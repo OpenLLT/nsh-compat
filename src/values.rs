@@ -328,6 +328,7 @@ impl Mounted {
                 out.put("autoFocus", c.auto_focus.to_string());
                 out.put("autoComplete", auto_fill(c.auto_fill).into());
                 out.put("caret", (!c.caret_hidden).to_string());
+                out.put("pasteBehavior", c.paste_behavior.js_name().into());
                 if let Some(v) = &c.accessory_id {
                     out.put("inputAccessoryViewID", v.to_string());
                 }
