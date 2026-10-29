@@ -23,16 +23,18 @@
 //!   Dialog.onOpenChange`), less the host props' names, which it inherits
 //!   or passes on as they are (`testID`, `style`, `animation`, ...) and
 //!   which are items of their own; an event is an `on…` function;
-//! - `[styles] <name>`: the keys of `LayoutStyle`, `ViewStyle`, `TextStyle`
-//!   and `ImageStyle`.
+//! - `[styles] <name>`: the keys of `LayoutStyle`, `ViewStyle`, `TextStyle`,
+//!   `InputStyle` and `ImageStyle`.
 //!
 //! A script claims the parts it checks with `covers <item>` steps, and the
 //! claims are verified ([`verify`]): the bundle uses the part (a
 //! component's prop: the component and the name), and a prop, event or
 //! style key renamed in the bundle makes a check of the script fail (any
 //! step that checks: `expect`, `absent`, `tap`, `frame`, `origin`,
-//! `prop`, `noprop`, `style`, `nostyle`, `listens`, `log`), so the script
-//! sees what it does; a prop a component requires (`NavStack`'s `state`)
+//! `prop`, `noprop`, `style`, `nostyle`, `drawing`, `nodrawing`,
+//! `listens`, `log`), so the script sees what it does (the paint styles
+//! `fill`, `stroke`, `strokeWidth` and `strokeDasharray` show only in what
+//! a canvas draws: a `drawing` step); a prop a component requires (`NavStack`'s `state`)
 //! may make the app fail instead. Exports and globals cannot be taken out of an app that still
 //! runs, so only their use is verified; their claim is the script
 //! author's word that a step checks their result.
@@ -58,7 +60,13 @@ use std::{
 use super::{apps, compare, text};
 
 /// The interfaces of the style keys.
-const STYLES: &[&str] = &["LayoutStyle", "ViewStyle", "TextStyle", "ImageStyle"];
+const STYLES: &[&str] = &[
+    "LayoutStyle",
+    "ViewStyle",
+    "TextStyle",
+    "InputStyle",
+    "ImageStyle",
+];
 
 /// The primitives the JSX compiler makes in place rather than import
 /// (`jsx::PRIMITIVES`): their host element, or `None` for `List`, which is
@@ -67,8 +75,8 @@ const PRIMITIVES: &[(&str, &str, Option<&str>)] = &[
     ("nsh", "View", Some("view")),
     ("nsh", "Text", Some("text")),
     ("nsh", "Scroll", Some("scroll")),
-    ("nsh", "Input", Some("input")),
     ("nsh", "Overlay", Some("overlay")),
+    ("nsh", "Shader", Some("shader")),
     ("nsh", "Image", Some("image")),
     ("nsh", "WebView", Some("webview")),
     ("nsh", "Video", Some("video")),
@@ -77,6 +85,7 @@ const PRIMITIVES: &[(&str, &str, Option<&str>)] = &[
     ("nsh/webview", "WebView", Some("webview")),
     ("nsh/video", "Video", Some("video")),
     ("nsh/list", "List", None),
+    ("nsh/base", "Input", Some("input")),
 ];
 
 /// The prefixes of a platform's props interfaces and the prop that holds

@@ -39,8 +39,8 @@ use nsh_core::{
     InputConfig, KeyboardDismissMode, KeyboardTaps, Keyframes, ModalConfig, MountItem, NativeProps,
     ResizeMode, ResolvedTextStyle, ScreenConfig, ScrollBehavior, TextAlign, TextTransform,
     TransformKind, VideoProps, ViewKind, ViewProps, ViewStyle, WebProps, WebSource,
+    element::PropEnum,
     geometry::{DefiniteLength, Percentage, Points, REM_SIZE},
-    ui::PropEnum,
 };
 
 /// The platforms whose props are written `<platform>.<name>` in scripts as
@@ -66,7 +66,10 @@ pub(crate) struct Mounted {
     native: Option<NativeProps>,
     /// The interaction states the platform reports
     /// ([`MountItem::TrackStates`]; bits of `nsh_core::tailwind::state`).
-    tracked: u8,
+    tracked: u16,
+    /// A canvas's latest drawing ([`MountItem::Canvas`]), as
+    /// [`Mounted::drawing`] writes it.
+    drawing: Option<Arc<nsh_core::canvas::Drawing>>,
     /// The keys [`Later`] reads.
     later: Later,
 }
@@ -108,6 +111,7 @@ impl Mounted {
             MountItem::ModalConfig { config, .. } => self.modal = Some(*config),
             MountItem::NativeProps { props, .. } => self.native = Some(props.clone()),
             MountItem::TrackStates { states, .. } => self.tracked = *states,
+            MountItem::Canvas { drawing, .. } => self.drawing = Some(drawing.clone()),
             _ => {}
         }
         self.later.apply(item);
@@ -135,7 +139,8 @@ impl Mounted {
             | MountItem::Gestures { id, .. }
             | MountItem::StickyCells { id, .. }
             | MountItem::ScrollBy { id, .. }
-            | MountItem::Command { id, .. } => *id,
+            | MountItem::Command { id, .. }
+            | MountItem::Canvas { id, .. } => *id,
             _ => return None,
         })
     }
@@ -155,7 +160,7 @@ impl Mounted {
 
     /// Whether the platform reports all the interaction states `states`
     /// (bits of `nsh_core::tailwind::state`) of the view.
-    pub(crate) fn tracks(&self, states: u8) -> bool {
+    pub(crate) fn tracks(&self, states: u16) -> bool {
         self.tracked & states == states
     }
 
@@ -164,7 +169,6 @@ impl Mounted {
         let mut out = Out::new();
         let p = self.props.as_deref().cloned().unwrap_or_default();
         let a = &p.accessibility;
-        out.put("pointerEvents", p.pointer_events.js_name().into());
         out.put("hitSlop", insets(&p.hit_slop));
         if let Some(v) = p.long_press_delay {
             out.put("delayLongPress", num(v));
@@ -239,22 +243,14 @@ impl Mounted {
         if let Some(v) = p.focusable {
             out.put("focusable", v.to_string());
         }
-        if p.selection_area {
-            out.put("selectionArea", "true".into());
+        if p.selectable_view {
+            out.put("selectableView", "true".into());
         }
         let style = self.style.as_deref().cloned().unwrap_or_default();
         out.put("elevation", num(style.elevation));
         out.put("backdropMaterial", style.backdrop_material.name().into());
 
         match self.kind {
-            Some(ViewKind::Text) => {
-                let text = self.text.as_deref().cloned().unwrap_or_default();
-                out.put("numberOfLines", text.max_lines.to_string());
-                out.put("ellipsizeMode", text.ellipsize.js_name().into());
-                if let Some(v) = text.selectable {
-                    out.put("selectable", v.to_string());
-                }
-            }
             Some(ViewKind::Image) => {
                 let (source, resize, options) = self.image.clone().unwrap_or_default();
                 if let Some(s) = source {
@@ -448,6 +444,25 @@ impl Mounted {
     /// of the run at UTF-16 offset `at` (the first run by default).
     pub(crate) fn styles(&self, at: Option<u32>) -> Out {
         let mut out = Out::new();
+        let p = self.props.as_deref().cloned().unwrap_or_default();
+        out.put("pointerEvents", p.pointer_events.js_name().into());
+        if let Some(ViewKind::Text) = self.kind {
+            let text = self.text.as_deref().cloned().unwrap_or_default();
+            out.put("numberOfLines", text.max_lines.to_string());
+            out.put(
+                "textOverflow",
+                match text.ellipsize {
+                    nsh_core::EllipsizeMode::Tail => "ellipsis",
+                    nsh_core::EllipsizeMode::Head => "ellipsis-start",
+                    nsh_core::EllipsizeMode::Middle => "ellipsis-middle",
+                    nsh_core::EllipsizeMode::Clip => "clip",
+                }
+                .into(),
+            );
+            if let Some(v) = text.selectable {
+                out.put("userSelect", if v { "text" } else { "none" }.into());
+            }
+        }
         let s = self.style.as_deref().cloned().unwrap_or_default();
         out.put("backgroundColor", color(s.background_color));
         out.put("borderRadius", num(s.border_radius));
@@ -503,10 +518,6 @@ impl Mounted {
             }
             .into(),
         );
-        out.put("shadowColor", color(s.shadow.color));
-        out.put("shadowOffset", size(s.shadow.offset_x, s.shadow.offset_y));
-        out.put("shadowOpacity", num(s.shadow.opacity));
-        out.put("shadowRadius", num(s.shadow.radius));
         out.put("transform", transform(&s));
         if let Some(c) = s.tint_color {
             out.put("tintColor", color(c));
@@ -660,6 +671,9 @@ impl Mounted {
                 }
                 if let Some(v) = c.selection_color {
                     out.put("selectionColor", color(v));
+                }
+                if let Some(v) = c.caret_color {
+                    out.put("caretColor", color(v));
                 }
                 (c.style, c.align)
             }
@@ -1089,7 +1103,6 @@ fn values_are_written_as_apps_write_them() {
     let styles = view.styles(None);
     assert_eq!(styles["backgroundColor"], "#00000000");
     assert_eq!(styles["opacity"], "1");
-    assert_eq!(styles["shadowOffset"], "width=0 height=-3");
     assert_eq!(styles["transformOrigin"], "50% 50% 0");
     assert_eq!(view.props()["accessibilityState"], "{}");
     let image = Mounted {
@@ -1293,6 +1306,20 @@ impl Mounted {
         Some(out)
     }
 
+    /// The operations of the canvas's latest drawing, as drawing.rs writes
+    /// them; none until it drew (or for a view that is no canvas).
+    /// Whether a canvas drew here.
+    pub(crate) fn draws(&self) -> bool {
+        self.drawing.is_some()
+    }
+
+    pub(crate) fn drawing(&self) -> Vec<String> {
+        self.drawing
+            .as_deref()
+            .map(crate::drawing::ops)
+            .unwrap_or_default()
+    }
+
     /// The user scrolled the view to `x`, `y` (a script's `scroll` step).
     pub(crate) fn scrolled(&mut self, x: f32, y: f32) {
         self.later.offset = Some((x, y));
@@ -1304,6 +1331,12 @@ thread_local! {
     /// with: the mount items create them before views bind them.
     static ANIMATED: std::cell::RefCell<std::collections::HashMap<nsh_core::animation::NodeId, f32>> =
         Default::default();
+}
+
+/// The value animated node `node` of the run on this thread was created
+/// with.
+pub(crate) fn animated_value(node: nsh_core::animation::NodeId) -> Option<f32> {
+    ANIMATED.with(|a| a.borrow().get(&node).copied())
 }
 
 /// Takes in the animated values `item` creates; `None` starts a run.
