@@ -1301,6 +1301,44 @@ impl Mounted {
         self.modal.as_ref().is_some_and(|m| m.close_on_escape)
     }
 
+    /// The interaction states the platform reports of the view
+    /// ([`MountItem::TrackStates`]).
+    pub(crate) fn tracked(&self) -> u16 {
+        self.tracked
+    }
+
+    /// Whether the view itself is disabled (its accessibility state).
+    pub(crate) fn disabled(&self) -> bool {
+        self.props
+            .as_ref()
+            .is_some_and(|p| p.accessibility.state.disabled)
+    }
+
+    /// Whether Tab stops at the view where it stops at views (macOS, the
+    /// web), disabled aside: an input that edits, or a view
+    /// [`ViewProps::focus_stop`] takes (one that takes presses unless
+    /// `focusable={false}`, a `focusable={true}` one whether or not it
+    /// does).
+    pub(crate) fn tab_stop(&self) -> bool {
+        if self.is_input() {
+            return self
+                .input
+                .as_ref()
+                .map_or_else(|| InputConfig::default().editable, |c| c.editable);
+        }
+        let props = ViewProps {
+            focusable: self.props.as_ref().and_then(|p| p.focusable),
+            ..Default::default()
+        };
+        props.focus_stop(self.listens(EventKind::Press))
+    }
+
+    /// An input's configuration as the platform was last told it (the
+    /// defaults until it was).
+    pub(crate) fn input_config(&self) -> InputConfig {
+        self.input.as_deref().cloned().unwrap_or_default()
+    }
+
     /// Whether the view is a text input.
     pub(crate) fn is_input(&self) -> bool {
         self.kind == Some(ViewKind::Input)
@@ -1397,6 +1435,19 @@ pub(crate) fn scrolled(id: nsh_core::NodeId, x: f32, y: f32) {
         if animator.scrolled(id, at) {
             animator.scroll_ended(id);
         }
+    });
+}
+
+/// The app scrolled view `id` to `x`, `y` (`scrollTo()`, `scrollToEnd()`),
+/// as a platform tells the graph beside its views after a batch (`nsh
+/// test`'s): the value bound to the view's offset follows it; nothing
+/// settles, as no finger let go.
+pub(crate) fn moved(id: nsh_core::NodeId, x: f32, y: f32) {
+    LIVE.with(|l| {
+        let (animator, start) = &mut *l.borrow_mut();
+        animator.tick(start.elapsed().as_secs_f64());
+        let at = nsh_core::geometry::point(nsh_core::geometry::px(x), nsh_core::geometry::px(y));
+        animator.scrolled(id, at);
     });
 }
 
