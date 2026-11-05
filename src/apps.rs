@@ -118,7 +118,8 @@
 //!   on every platform: the newest binding of the app's keymap
 //!   (`keymap.bind`, and the keys a focused control binds: a tree's or a
 //!   carousel's arrows) that fires where the focus is hears it
-//!   (`onKeyCommand`). A key no binding takes: on macOS and the web, Tab
+//!   (`onKeyCommand`); a `passThrough` binding hears it and leaves the
+//!   key to what follows. A key no binding takes: on macOS and the web, Tab
 //!   (`shift+tab`: backwards) moves the keyboard focus to the next stop,
 //!   around from the last (the inputs that edit, the views that take
 //!   presses unless `focusable={false}` and the `focusable={true}` ones;
@@ -708,6 +709,15 @@ impl Views {
             }
             // A held key's repeat: consumed.
             KeyMatch::Held => return,
+            // A `passThrough` binding: heard, and the key goes on.
+            KeyMatch::Notify(id) => {
+                let id = PayloadValue::Number(f64::from(id));
+                self.reports.push(Report::Event(
+                    ROOT,
+                    EventKind::KeyCommand,
+                    EventPayload::Value(id),
+                ));
+            }
             KeyMatch::None => {}
         }
         if stroke.key == Key::Tab && plain && tabs {
@@ -1676,18 +1686,19 @@ pub(crate) fn run(code: String, script: &str, dir: &Path) -> Result<(), Failure>
                 Some("web") => Os::Web,
                 _ => {
                     return Err(format!(
-                        "`{line}`: platform ios|android|macos|windows|linux|web [desktop]"
+                        "`{line}`: platform ios|android|macos|windows|linux|web [desktop|terminal]"
                     )
                     .into());
                 }
             };
-            let desktop = match words.next() {
-                None => environment.os.is_desktop(),
-                Some("desktop") => true,
-                Some(other) => return Err(format!("`{line}`: `{other}`, not `desktop`").into()),
-            };
-            if desktop {
-                environment.idiom = Idiom::Desktop;
+            match words.next() {
+                None if environment.os.is_desktop() => environment.idiom = Idiom::Desktop,
+                None => {}
+                Some("desktop") => environment.idiom = Idiom::Desktop,
+                Some("terminal") => environment.idiom = Idiom::Terminal,
+                Some(other) => {
+                    return Err(format!("`{line}`: `{other}`, not `desktop` or `terminal`").into());
+                }
             }
         } else if let Some(scale) = line.strip_prefix("fontscale ") {
             environment.font_scale = scale
